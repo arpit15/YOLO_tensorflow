@@ -4,6 +4,9 @@ import cv2
 import time
 import sys
 
+from ipdb import set_trace
+# import keras.backend.tensorflow_backend as K
+
 class YOLO_TF:
 	fromfile = None
 	tofile_img = 'test/output.jpg'
@@ -25,6 +28,9 @@ class YOLO_TF:
 	h_img = 480
 
 	def __init__(self,argvs = []):
+		# K.set_session(tf.Session(config=tf.ConfigProto(per_process_gpu_memory_fraction=0.3)))
+		# tf.set_session(tf.Session(config=config))
+
 		self.argv_parser(argvs)
 		self.build_networks()
 		if self.fromfile is not None: self.detect_from_file(self.fromfile)
@@ -62,7 +68,10 @@ class YOLO_TF:
 		self.fc_17 = self.fc_layer(17,self.fc_16,4096,flat=False,linear=False)
 		#skip dropout_18
 		self.fc_19 = self.fc_layer(19,self.fc_17,1470,flat=False,linear=True)
-		self.sess = tf.Session()
+		config = tf.ConfigProto()
+		config.gpu_options.allow_growth = True
+
+		self.sess = tf.Session(config=config)
 		self.sess.run(tf.initialize_all_variables())
 		self.saver = tf.train.Saver()
 		self.saver.restore(self.sess,self.weights_file)
@@ -74,12 +83,14 @@ class YOLO_TF:
 		biases = tf.Variable(tf.constant(0.1, shape=[filters]))
 
 		pad_size = size//2
+		# print pad_size
 		pad_mat = np.array([[0,0],[pad_size,pad_size],[pad_size,pad_size],[0,0]])
 		inputs_pad = tf.pad(inputs,pad_mat)
-
+		print inputs.get_shape(), inputs_pad.get_shape()
 		conv = tf.nn.conv2d(inputs_pad, weight, strides=[1, stride, stride, 1], padding='VALID',name=str(idx)+'_conv')	
 		conv_biased = tf.add(conv,biases,name=str(idx)+'_conv_biased')	
 		if self.disp_console : print '    Layer  %d : Type = Conv, Size = %d * %d, Stride = %d, Filters = %d, Input channels = %d' % (idx,size,size,stride,filters,int(channels))
+		print conv_biased.get_shape()
 		return tf.maximum(self.alpha*conv_biased,conv_biased,name=str(idx)+'_leaky_relu')
 
 	def pooling_layer(self,idx,inputs,size,stride):
@@ -112,6 +123,7 @@ class YOLO_TF:
 		inputs[0] = (img_resized_np/255.0)*2.0-1.0
 		in_dict = {self.x: inputs}
 		net_output = self.sess.run(self.fc_19,feed_dict=in_dict)
+		# set_trace()
 		self.result = self.interpret_output(net_output[0])
 		self.show_results(img,self.result)
 		strtime = str(time.time()-s)
@@ -140,12 +152,13 @@ class YOLO_TF:
 		self.show_results(self.boxes,img)
 
 	def interpret_output(self,output):
-		probs = np.zeros((7,7,2,20))
-		class_probs = np.reshape(output[0:980],(7,7,20))
+		
+		probs = np.zeros((7,7,2,(self.num_class)))
+		class_probs = np.reshape(output[0:980],(7,7,self.num_class))
 		scales = np.reshape(output[980:1078],(7,7,2))
 		boxes = np.reshape(output[1078:],(7,7,2,4))
 		offset = np.transpose(np.reshape(np.array([np.arange(7)]*14),(2,7,7)),(1,2,0))
-
+		# set_trace()
 		boxes[:,:,:,0] += offset
 		boxes[:,:,:,1] += np.transpose(offset,(1,0,2))
 		boxes[:,:,:,0:2] = boxes[:,:,:,0:2] / 7.0
@@ -158,7 +171,7 @@ class YOLO_TF:
 		boxes[:,:,:,3] *= self.h_img
 
 		for i in range(2):
-			for j in range(20):
+			for j in range(self.num_class):
 				probs[:,:,i,j] = np.multiply(class_probs[:,:,j],scales[:,:,i])
 
 		filter_mat_probs = np.array(probs>=self.threshold,dtype='bool')
@@ -171,7 +184,7 @@ class YOLO_TF:
 		boxes_filtered = boxes_filtered[argsort]
 		probs_filtered = probs_filtered[argsort]
 		classes_num_filtered = classes_num_filtered[argsort]
-		
+		set_trace()
 		for i in range(len(boxes_filtered)):
 			if probs_filtered[i] == 0 : continue
 			for j in range(i+1,len(boxes_filtered)):
@@ -230,7 +243,7 @@ class YOLO_TF:
 
 def main(argvs):
 	yolo = YOLO_TF(argvs)
-	cv2.waitKey(1000)
+	cv2.waitKey(0)
 
 
 if __name__=='__main__':	
